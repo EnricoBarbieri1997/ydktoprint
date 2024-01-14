@@ -23,6 +23,7 @@ $horizontalPadding = [Math]::Floor(($A4CmWidth - $cardCmWidth * 3) / 2 * $pixelP
 $verticalPadding = [Math]::Floor(($A4CmHeight - $cardCmHeight * 3) / 2 * $pixelPerCm)
 
 $page = $null
+$pageGraphics = $null
 $cardsOnCurrentPageCount = 0
 $pageCount = 0
 
@@ -38,20 +39,6 @@ public class BitmapConstructors
   public static Bitmap WithSize(Int32 width, Int32 height)
     {
         return new Bitmap(width, height);
-    }
-}
-"@
-
-$BitmapOperationsDeclaration = @"
-using System;
-public class BitmapOperations
-{
-  public static void Copy(System.IntPtr source, System.IntPtr destination, long bytes)
-    {
-        unsafe 
-        {
-            System.Buffer.MemoryCopy((void*)source, (void*)destination, bytes, bytes);
-        }
     }
 }
 "@
@@ -142,15 +129,7 @@ function copyCard
     )
     $cardBitmap = [BitmapConstructors]::FromFileWithSize("$PSScriptRoot$tmpPath$passcode.jpg", $cardsPixelWidth, $cardsPixelHeight)
 
-    # Lockbit technique
-    $cardRect = New-Object System.Drawing.Rectangle 0, 0, $cardsPixelWidth, $cardsPixelHeight
-    $cardData = $cardBitmap.LockBits($cardRect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, $cardBitmap.PixelFormat)
-    $cardPointer = $cardData.Scan0
-    
-    $bytes = [Math]::Abs($cardData.Stride) * $cardData.Height
-    # End of lockbit technique
     for ($i = 0; $i -lt $count; $i++) {
-        # Copy-Item "$PSScriptRoot$tmpPath$passcode.jpg" -Destination "$PSScriptRoot$cardsPath$passcode-$($i+1).jpg"
         if($cardsOnCurrentPageCount -eq 9)
         {
             $global:cardsOnCurrentPageCount = 0
@@ -160,6 +139,7 @@ function copyCard
         if($null -eq $page)
         {
             $global:page = [BitmapConstructors]::WithSize($A4Width, $A4Height)
+            $global:pageGraphics = [System.Drawing.Graphics]::FromImage($page)
             $page.SetResolution($DPI, $DPI)
         }
         $row = [Math]::Floor($cardsOnCurrentPageCount / 3)
@@ -167,24 +147,10 @@ function copyCard
         $x = [Math]::Floor($horizontalPadding + $col * $cardsPixelWidth)
         $y = [Math]::Floor($verticalPadding + $row * $cardsPixelHeight)
 
-        # Lockbit technique
-        $pageRect = New-Object System.Drawing.Rectangle $x, $y, $cardsPixelWidth, $cardsPixelHeight
-        $pageData = $page.LockBits($pageRect, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, $page.PixelFormat)
-        $pagePointer = $pageData.Scan0
-
-        # $temp = New-Object byte[] $bytes
-        #[System.Runtime.InteropServices.Marshal]::Copy($cardPointer, $temp, 0, $bytes)
-        #[System.Runtime.InteropServices.Marshal]::Copy($temp, 0, $pagePointer, $bytes)
-        [BitmapOperations]::Copy($cardPointer, $pagePointer, $bytes)
-
-        $page.UnlockBits($pageData)
-        # End of lockbit technique
+        $pageGraphics.DrawImage($cardBitmap, $x, $y, $cardsPixelWidth, $cardsPixelHeight)
         
         $global:cardsOnCurrentPageCount += 1
     }
-    # Lockbit technique
-    $cardBitmap.UnlockBits($cardData)
-    # End of lockbit technique
 }
 
 function WriteDeckList
@@ -201,7 +167,6 @@ function WriteDeckList
 }
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition $BitmapConstructorsDeclaration -ReferencedAssemblies System.Drawing.Common,System.Drawing.Primitives
-Add-Type -TypeDefinition $BitmapOperationsDeclaration -CompilerOptions '/unsafe'
 ParseFolder $path
 WriteDeckList $cardsCount
 "End"
