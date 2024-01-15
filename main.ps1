@@ -11,8 +11,8 @@ $path = "$scriptDir$path"
 
 $DPI = 300
 $pixelPerCm = $DPI * (1/2.54)
-$cardCmWidth = 5.9
-$cardCmHeight = 8.6
+$cardCmWidth = 5.88 # 5.9
+$cardCmHeight = 8.58 # 8.6
 $A4CmWidth = 21
 $A4CmHeight = 29.7
 $cardsPixelWidth = [Math]::Floor($cardCmWidth * $pixelPerCm)
@@ -69,13 +69,13 @@ function ParseFileContent
     ForEach-Object {
         if(isNumeric($_))
         {
-            if($cardsCount.Contains($_))
+            if($script:cardsCount.Contains($_))
             {
-                $cardsCount[$_]++
+                $script:cardsCount[$_]++
             }
             else
             {
-                $cardsCount[$_] = 1
+                $script:cardsCount[$_] = 1
             }
         }
     }
@@ -84,9 +84,9 @@ function ParseFileContent
 function ParseFolder
 {
     param(
-      [string] $path
+      [string] $script:path
     )
-    Get-ChildItem $path -Filter *.ydk | 
+    Get-ChildItem $script:path -Filter *.ydk | 
     Foreach-Object {
         ParseFileContent $_.FullName
     }
@@ -107,18 +107,24 @@ function downloadCard
     param (
         [string]$passcode
     )
-    $cardUrl = "$url$passcode.jpg"
-    Invoke-WebRequest $cardUrl -OutFile "$PSScriptRoot$tmpPath$passcode.jpg"
+    if (!(Test-Path "$PSScriptRoot$tmpPath$passcode.jpg"))
+    {
+        $cardUrl = "$url$passcode.jpg"
+        Invoke-WebRequest $cardUrl -OutFile "$PSScriptRoot$tmpPath$passcode.jpg"
+    }
+}
+
+function initPage
+{
+    $script:page = [BitmapConstructors]::WithSize($script:A4Width, $script:A4Height)
+    $script:pageGraphics = [System.Drawing.Graphics]::FromImage($script:page)
+    $script:page.SetResolution($script:DPI, $script:DPI)
 }
 
 function savePage
 {
-    if($null -eq $page)
-    {
-        return
-    }
-    $page.Save("$PSScriptRoot$($cardsPath)page-$pageCount.png", [System.Drawing.Imaging.ImageFormat]::Png)
-    $global:page = $null
+    $script:page.Save("$PSScriptRoot$($cardsPath)page-$script:pageCount.png", [System.Drawing.Imaging.ImageFormat]::Png)
+    initPage
 }
 
 function copyCard
@@ -127,29 +133,24 @@ function copyCard
         [string]$passcode,
         [int]$count
     )
-    $cardBitmap = [BitmapConstructors]::FromFileWithSize("$PSScriptRoot$tmpPath$passcode.jpg", $cardsPixelWidth, $cardsPixelHeight)
+    $cardBitmap = [BitmapConstructors]::FromFileWithSize("$PSScriptRoot$tmpPath$passcode.jpg", $script:cardsPixelWidth, $script:cardsPixelHeight)
 
     for ($i = 0; $i -lt $count; $i++) {
-        if($cardsOnCurrentPageCount -eq 9)
+        $row = [Math]::Floor($script:cardsOnCurrentPageCount / 3)
+        $col = $script:cardsOnCurrentPageCount % 3
+        $x = [Math]::Floor($script:horizontalPadding + $col * $script:cardsPixelWidth)
+        $y = [Math]::Floor($script:verticalPadding + $row * $script:cardsPixelHeight)
+
+        $script:pageGraphics.DrawImage($cardBitmap, $x, $y, $script:cardsPixelWidth, $script:cardsPixelHeight)
+        
+        $script:cardsOnCurrentPageCount += 1
+
+        if(9 -eq $script:cardsOnCurrentPageCount)
         {
-            $global:cardsOnCurrentPageCount = 0
-            $global:pageCount += 1
+            $script:cardsOnCurrentPageCount = 0
+            $script:pageCount += 1
             savePage
         }
-        if($null -eq $page)
-        {
-            $global:page = [BitmapConstructors]::WithSize($A4Width, $A4Height)
-            $global:pageGraphics = [System.Drawing.Graphics]::FromImage($page)
-            $page.SetResolution($DPI, $DPI)
-        }
-        $row = [Math]::Floor($cardsOnCurrentPageCount / 3)
-        $col = $cardsOnCurrentPageCount % 3
-        $x = [Math]::Floor($horizontalPadding + $col * $cardsPixelWidth)
-        $y = [Math]::Floor($verticalPadding + $row * $cardsPixelHeight)
-
-        $pageGraphics.DrawImage($cardBitmap, $x, $y, $cardsPixelWidth, $cardsPixelHeight)
-        
-        $global:cardsOnCurrentPageCount += 1
     }
 }
 
@@ -163,10 +164,16 @@ function WriteDeckList
         downloadCard $c.Key
         copyCard $c.Key $c.Value
     }
-    savePage
+    if(9 -ne $script:cardsOnCurrentPageCount -and 0 -ne $script:cardsOnCurrentPageCount)
+    {
+        $script:pageCount += 1
+        savePage
+    }
 }
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition $BitmapConstructorsDeclaration -ReferencedAssemblies System.Drawing.Common,System.Drawing.Primitives
-ParseFolder $path
-WriteDeckList $cardsCount
+Write-Host $PSVersionTable
+ParseFolder $script:path
+initPage
+WriteDeckList $script:cardsCount
 "End"
